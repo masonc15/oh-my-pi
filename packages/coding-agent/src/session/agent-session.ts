@@ -516,12 +516,14 @@ export class AgentSession {
 							const injection = this.#getTtsrInjectionContent();
 							if (injection) {
 								this.agent.appendMessage({
-									role: "user",
-									content: [{ type: "text", text: injection.content }],
+									role: "custom",
+									customType: "ttsr-injection",
+									content: injection.content,
+									display: false,
+									details: { rules: injection.rules.map(rule => rule.name) },
 									timestamp: Date.now(),
-									synthetic: true,
 								});
-								this.#ttsrManager?.markInjected(injection.rules);
+								this.#markTtsrInjected(injection.rules);
 							}
 							this.agent.continue().catch(() => {});
 						}, 50);
@@ -671,6 +673,14 @@ export class AgentSession {
 		}
 	}
 
+	#markTtsrInjected(rules: Rule[]): void {
+		if (rules.length === 0) {
+			return;
+		}
+		this.#ttsrManager?.markInjected(rules);
+		this.sessionManager.appendTtsrInjection(rules.map(rule => rule.name));
+	}
+
 	#shouldInterruptForTtsrMatch(matchContext: TtsrMatchContext): boolean {
 		const mode = this.#ttsrManager?.getSettings().interruptMode ?? "always";
 		if (mode === "never") {
@@ -699,12 +709,21 @@ export class AgentSession {
 			return;
 		}
 		this.agent.followUp({
-			role: "user",
-			content: [{ type: "text", text: injection.content }],
+			role: "custom",
+			customType: "ttsr-injection",
+			content: injection.content,
+			display: false,
+			details: { rules: injection.rules.map(rule => rule.name) },
 			timestamp: Date.now(),
-			synthetic: true,
 		});
-		this.#ttsrManager?.markInjected(injection.rules);
+		this.#markTtsrInjected(injection.rules);
+		// followUp() only enqueues; resume on the next tick once streaming settles.
+		setTimeout(() => {
+			if (this.agent.state.isStreaming || !this.agent.hasQueuedMessages()) {
+				return;
+			}
+			this.agent.continue().catch(() => {});
+		}, 0);
 	}
 
 	/** Build TTSR match context for tool call argument deltas. */
